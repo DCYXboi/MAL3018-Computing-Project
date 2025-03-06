@@ -153,7 +153,7 @@ func syncStatusHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "All nodes are synchronized.\n")
 }
 
-func main() {
+func main2() {
 	// Initialize Blockchain with Genesis Block
 	Blockchain = append(Blockchain, GenesisBlock())
 
