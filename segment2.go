@@ -193,6 +193,8 @@ func syncStatusHandler2(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "✅ All nodes in Segment 2 are synchronized.\n")
 }
 
+// HTTP Handler to Add a New Block to Segment 2
+
 // Start the Segment 2 blockchain network
 func main2() {
 	// Initialize database and blockchain

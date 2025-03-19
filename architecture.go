@@ -22,6 +22,9 @@ const collectionName = "blocks"
 var mongoClient *mongo.Client
 var blockCollection *mongo.Collection
 
+// Blockchain is the in-memory representation of the blockchain
+var Blockchain []Block
+
 // Block represents each 'block' in the blockchain
 type Block struct {
 	Index     int    `bson:"index"`
@@ -87,10 +90,51 @@ func getBlockchain(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// HTTP Handler to Add a New Block
+func addBlock(w http.ResponseWriter, r *http.Request) {
+	// Ensure the request method is POST
+	if r.Method != http.MethodPost {
+		http.Error(w, "Invalid request method. Only POST is allowed.", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Parse the form data
+	err := r.ParseForm()
+	if err != nil {
+		http.Error(w, "Error parsing form data.", http.StatusBadRequest)
+		return
+	}
+
+	// Validate input data
+	data := r.FormValue("data")
+	if data == "" {
+		http.Error(w, "Data field is required.", http.StatusBadRequest)
+		return
+	}
+
+	// Create a new block
+	prevBlock := Blockchain[len(Blockchain)-1]
+	newBlock := Block{
+		Index:     prevBlock.Index + 1,
+		Timestamp: time.Now().String(),
+		Data:      data,
+		Hash:      fmt.Sprintf("%x", time.Now().UnixNano()),
+		PrevHash:  prevBlock.Hash,
+	}
+
+	// Append the new block to the blockchain
+	Blockchain = append(Blockchain, newBlock)
+	SaveBlock(newBlock)
+
+	// Respond with success
+	w.WriteHeader(http.StatusCreated)
+	fmt.Fprintf(w, "Block added successfully: %+v\n", newBlock)
+}
+
 // Main Function
 func main() {
 	// Connect to MongoDB
-	connectMongoDB()
+	Blockchain = LoadBlockchain()
 
 	// Load existing blockchain from database
 	Blockchain := LoadBlockchain()
