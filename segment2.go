@@ -1,7 +1,9 @@
 package main
 
 import (
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -22,6 +24,54 @@ type Block2 struct {
 	Data      string `json:"data"`
 	Hash      string `json:"hash"`
 	PrevHash  string `json:"prev_hash"`
+}
+
+// Function to calculate SHA-256 hash for a block in Segment 2
+func calculateHash2(block Block2) string {
+	record := fmt.Sprintf("%d%s%s%s", block.Index, block.Timestamp, block.Data, block.PrevHash)
+	hash := sha256.Sum256([]byte(record))
+	return hex.EncodeToString(hash[:])
+}
+
+// HTTP Handler to Add a New Block to Segment 2
+func addBlockHandler2Post(w http.ResponseWriter, r *http.Request) {
+	// Ensure the request method is POST
+	if r.Method != http.MethodPost {
+		http.Error(w, "Invalid request method. Only POST is allowed.", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Parse the form data
+	err := r.ParseForm()
+	if err != nil {
+		http.Error(w, "Error parsing form data.", http.StatusBadRequest)
+		return
+	}
+
+	// Validate input data
+	data := r.FormValue("data")
+	if data == "" {
+		http.Error(w, "Data field is required.", http.StatusBadRequest)
+		return
+	}
+
+	// Create a new block
+	prevBlock := Blockchain2[len(Blockchain2)-1]
+	newBlock := Block2{
+		Index:     prevBlock.Index + 1,
+		Timestamp: time.Now().String(),
+		Data:      data,
+		PrevHash:  prevBlock.Hash,
+	}
+	newBlock.Hash = calculateHash2(newBlock)
+
+	// Append the new block to the Segment 2 blockchain
+	Blockchain2 = append(Blockchain2, newBlock)
+	saveBlock2(newBlock) // Save the new block of type Block2
+
+	// Respond with success
+	w.WriteHeader(http.StatusCreated)
+	fmt.Fprintf(w, "Block added successfully to Segment 2: %+v\n", newBlock)
 }
 
 // Blockchain for Segment 2
@@ -66,6 +116,15 @@ func GenesisBlock2() Block2 {
 		Data:      "Genesis Block (Segment 2)",
 		Hash:      fmt.Sprintf("%x", time.Now().UnixNano()),
 		PrevHash:  "",
+	}
+}
+
+// Save a block to the database
+func saveBlock2(block Block2) {
+	_, err := db.Exec("INSERT INTO blocks (index, timestamp, data, hash, prev_hash) VALUES ($1, $2, $3, $4, $5)",
+		block.Index, block.Timestamp, block.Data, block.Hash, block.PrevHash)
+	if err != nil {
+		log.Println("⚠️ Error saving block to database:", err)
 	}
 }
 

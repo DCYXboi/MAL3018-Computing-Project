@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"net/http"
@@ -32,6 +34,54 @@ type Block struct {
 	Data      string `bson:"data"`
 	Hash      string `bson:"hash"`
 	PrevHash  string `bson:"prev_hash"`
+}
+
+// Function to calculate SHA-256 hash for a block
+func calculateHash(block Block) string {
+	record := fmt.Sprintf("%d%s%s%s", block.Index, block.Timestamp, block.Data, block.PrevHash)
+	hash := sha256.Sum256([]byte(record))
+	return hex.EncodeToString(hash[:])
+}
+
+// HTTP Handler to Add a New Block
+func addBlock(w http.ResponseWriter, r *http.Request) {
+	// Ensure the request method is POST
+	if r.Method != http.MethodPost {
+		http.Error(w, "Invalid request method. Only POST is allowed.", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Parse the form data
+	err := r.ParseForm()
+	if err != nil {
+		http.Error(w, "Error parsing form data.", http.StatusBadRequest)
+		return
+	}
+
+	// Validate input data
+	data := r.FormValue("data")
+	if data == "" {
+		http.Error(w, "Data field is required.", http.StatusBadRequest)
+		return
+	}
+
+	// Create a new block
+	prevBlock := Blockchain[len(Blockchain)-1]
+	newBlock := Block{
+		Index:     prevBlock.Index + 1,
+		Timestamp: time.Now().String(),
+		Data:      data,
+		PrevHash:  prevBlock.Hash,
+	}
+	newBlock.Hash = calculateHash(newBlock)
+
+	// Append the new block to the blockchain
+	Blockchain = append(Blockchain, newBlock)
+	SaveBlock(newBlock)
+
+	// Respond with success
+	w.WriteHeader(http.StatusCreated)
+	fmt.Fprintf(w, "Block added successfully: %+v\n", newBlock)
 }
 
 // Initialize MongoDB Connection
@@ -91,7 +141,7 @@ func getBlockchain(w http.ResponseWriter, r *http.Request) {
 }
 
 // HTTP Handler to Add a New Block
-func addBlock(w http.ResponseWriter, r *http.Request) {
+func addBlock1(w http.ResponseWriter, r *http.Request) {
 	// Ensure the request method is POST
 	if r.Method != http.MethodPost {
 		http.Error(w, "Invalid request method. Only POST is allowed.", http.StatusMethodNotAllowed)
@@ -131,8 +181,24 @@ func addBlock(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "Block added successfully: %+v\n", newBlock)
 }
 
+// Initialize the blockchain with a genesis block
+func initBlockchain() {
+	genesisBlock := Block{
+		Index:     0,
+		Timestamp: time.Now().String(),
+		Data:      "Genesis Block",
+		Hash:      calculateHash(Block{Index: 0, Timestamp: time.Now().String(), Data: "Genesis Block", PrevHash: ""}),
+		PrevHash:  "",
+	}
+	Blockchain = append(Blockchain, genesisBlock)
+	fmt.Println("Genesis block created!")
+}
+
 // Main Function
 func main() {
+	// Initialize the blockchain
+	initBlockchain()
+
 	// Connect to MongoDB
 	Blockchain = LoadBlockchain()
 
@@ -157,4 +223,9 @@ func main() {
 	port := ":8080"
 	fmt.Printf("Server running on http://localhost%s\n", port)
 	log.Fatal(http.ListenAndServe(port, nil))
+
+	// Start the HTTP server
+	http.HandleFunc("/addBlock", addBlock)
+	http.HandleFunc("/blockchain", getBlockchain)
+	log.Fatal(http.ListenAndServe(":8080", nil))
 }
