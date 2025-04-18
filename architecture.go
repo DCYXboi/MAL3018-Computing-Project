@@ -2,11 +2,15 @@ package main
 
 import (
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -20,7 +24,7 @@ const mongoURI = "mongodb://localhost:27017"
 // MongoDB Database & Collection Names
 const dbName = "blockchainDB"
 const collectionName = "blocks"
-
+const encryptionKey = "examplekey123456" // 16-byte key for AES-128
 var mongoClient *mongo.Client
 var blockCollection *mongo.Collection
 
@@ -43,7 +47,79 @@ func calculateHash(block Block) string {
 	return hex.EncodeToString(hash[:])
 }
 
-// HTTP Handler to Add a New Block
+// Function to encrypt data using AES
+func encrypt(data, key string) (string, error) {
+	block, err := aes.NewCipher([]byte(key))
+	if err != nil {
+		return "", err
+	}
+
+	plaintext := []byte(data)
+	ciphertext := make([]byte, len(plaintext))
+	stream := cipher.NewCFBEncrypter(block, []byte(key)[:block.BlockSize()])
+	stream.XORKeyStream(ciphertext, plaintext)
+
+	return hex.EncodeToString(ciphertext), nil
+}
+
+// Function to decrypt data using AES
+func decrypt(encryptedData, key string) (string, error) {
+	block, err := aes.NewCipher([]byte(key))
+	if err != nil {
+		fmt.Println("Error creating cipher:", err)
+		return "", err
+	}
+
+	ciphertext, err := hex.DecodeString(encryptedData)
+	if err != nil {
+		fmt.Println("Error decoding encrypted data:", err)
+		return "", err
+	}
+
+	plaintext := make([]byte, len(ciphertext))
+	stream := cipher.NewCFBDecrypter(block, []byte(key)[:block.BlockSize()])
+	stream.XORKeyStream(plaintext, ciphertext)
+
+	return string(plaintext), nil
+}
+
+// GetBlockByIndex retrieves a block by its index from MongoDB
+func GetBlockByIndex(index int) (*Block, error) {
+	var block Block
+	err := blockCollection.FindOne(context.TODO(), bson.M{"index": index}).Decode(&block)
+	if err != nil {
+		return nil, err
+	}
+	return &block, nil
+}
+
+func getBlockByIndexHandler(w http.ResponseWriter, r *http.Request) {
+	// Parse the index from the query parameters
+	indexParam := r.URL.Query().Get("index")
+	if indexParam == "" {
+		http.Error(w, "Index parameter is required", http.StatusBadRequest)
+		return
+	}
+
+	// Convert index to integer
+	index, err := strconv.Atoi(indexParam)
+	if err != nil {
+		http.Error(w, "Invalid index parameter", http.StatusBadRequest)
+		return
+	}
+
+	// Retrieve the block
+	block, err := GetBlockByIndex(index)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to retrieve block: %v", err), http.StatusNotFound)
+		return
+	}
+
+	// Respond with the block
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(block)
+}
+
 func addBlock1(w http.ResponseWriter, r *http.Request) {
 	// Ensure the request method is POST
 	if r.Method != http.MethodPost {
@@ -65,12 +141,20 @@ func addBlock1(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Encrypt the data
+	encryptionKey := "examplekey123456" // 16-byte key for AES-128
+	encryptedData, err := encrypt(data, encryptionKey)
+	if err != nil {
+		http.Error(w, "Error encrypting data.", http.StatusInternalServerError)
+		return
+	}
+
 	// Create a new block
 	prevBlock := Blockchain[len(Blockchain)-1]
 	newBlock := Block{
 		Index:     prevBlock.Index + 1,
 		Timestamp: time.Now().String(),
-		Data:      data,
+		Data:      encryptedData, // Store encrypted data
 		PrevHash:  prevBlock.Hash,
 	}
 	newBlock.Hash = calculateHash(newBlock)
@@ -138,9 +222,19 @@ func LoadBlockchain() []Block {
 // HTTP Handler to Get Blockchain from MongoDB
 func getBlockchain(w http.ResponseWriter, r *http.Request) {
 	blocks := LoadBlockchain()
+	encryptionKey := "examplekey123456" // Same key used for encryption
+
 	for _, block := range blocks {
+		// Attempt to decrypt the data
+		decryptedData, err := decrypt(block.Data, encryptionKey)
+		if err != nil {
+			fmt.Printf("Error decrypting block data for Index %d: %v\n", block.Index, err)
+			decryptedData = "[Unable to decrypt data]"
+		}
+
+		// Print the block with decrypted data
 		fmt.Fprintf(w, "Index: %d\nTimestamp: %s\nData: %s\nHash: %s\nPrevHash: %s\n\n",
-			block.Index, block.Timestamp, block.Data, block.Hash, block.PrevHash)
+			block.Index, block.Timestamp, decryptedData, block.Hash, block.PrevHash)
 	}
 }
 
@@ -245,6 +339,7 @@ func main() {
 		fmt.Println("Node is out of sync")
 	}
 
+	http.HandleFunc("/getBlockByIndex", getBlockByIndexHandler)
 	// HTTP Handlers
 	http.HandleFunc("/blockchain", getBlockchain)
 	http.HandleFunc("/addBlock", addBlock)
